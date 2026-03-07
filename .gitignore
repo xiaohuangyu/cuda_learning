@@ -1,0 +1,96 @@
+# CUDA Learning Project .gitignore
+
+# ==================== 编译产物 ====================
+# Build directories
+build/
+bin/
+lib/
+
+# Compiled object files
+*.o
+*.obj
+*.a
+*.lib
+*.so
+*.dylib
+
+# Executables
+*.exe
+*.out
+*.app
+
+# CUDA specific
+*.cubin
+*.fatbin
+*.ptx
+
+# ==================== IDE 和编辑器 ====================
+# IDE
+.idea/
+.vscode/
+*.swp
+*.swo
+*~
+
+# Visual Studio
+.vs/
+*.sln
+*.vcxproj
+*.vcxproj.filters
+*.vcxproj.user
+
+# Xcode
+*.xcodeproj/
+*.xcworkspace/
+
+# ==================== CMake ====================
+CMakeCache.txt
+CMakeFiles/
+cmake_install.cmake
+Makefile
+*.cmake
+!CMakeLists.txt
+
+# ==================== Python ====================
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+.Python
+venv/
+env/
+.venv/
+
+# ==================== Claude Code ====================
+.claude/
+
+# ==================== 课程资料（可选） ====================
+# 如果不想提交大型 PDF 文件，取消下面的注释
+# *.pdf
+
+# ==================== 系统文件 ====================
+.DS_Store
+.DS_Store?
+._*
+.Spotlight-V100
+.Trashes
+ehthumbs.db
+Thumbs.db
+
+# ==================== 日志和临时文件 ====================
+*.log
+*.tmp
+*.temp
+*.bak
+
+# ==================== 性能分析报告 ====================
+*.nsys-rep
+*.ncu-rep
+*.qdrep
+*.qdstrm
+
+# ==================== 其他 ====================
+# Archives
+*.zip
+*.tar.gz
+*.rar
