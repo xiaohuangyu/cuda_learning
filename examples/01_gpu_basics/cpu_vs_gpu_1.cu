@@ -1,63 +1,101 @@
 /*
- * CPU vs GPU 对比示例
- * ================
- * 本程序演示相同的计算任务在CPU和GPU上的执行时间对比
+ * CPU vs GPU 矩阵乘法对比示例
+ * ==========================
+ * 本程序演示相同的矩阵乘法任务在 CPU 和 GPU 上的执行时间对比：
+ *   C = A * B
  *
- * 任务：对大型数组进行简单的向量加法运算
- * C[i] = A[i] + B[i]
+ * CPU：朴素三重循环（row-major）
+ * GPU：tiled kernel + shared memory（row-major）
  */
 
 #include <stdio.h>
 #include <stdlib.h>
 #include <time.h>
+#include <math.h>
 
 // CUDA 运行时头文件
 #include <cuda_runtime.h>
 
-// 数据大小（1000万个元素）
-#define N 10000000
+// 矩阵维度：A(dim x dim) * B(dim x dim) = C(dim x dim)
+// 选择一个适中大小，保证演示时 CPU 不会太慢
+#define DIM 1024
+
+// GPU 计算 tile 大小（必须和 shared memory 数组维度一致）
+#define TILE_SIZE 16
+
+// 结果校验的容差（浮点误差可能来自累加顺序/FMA）
+#define EPS 1e-2f
+
+// CUDA 调用错误检查（便于定位问题）
+#define CUDA_CHECK(call)                                                     \
+    do {                                                                     \
+        cudaError_t err__ = (call);                                         \
+        if (err__ != cudaSuccess) {                                         \
+            fprintf(stderr, "CUDA error %s:%d: %s\n", __FILE__, __LINE__,   \
+                    cudaGetErrorString(err__));                              \
+            exit(1);                                                        \
+        }                                                                    \
+    } while (0)
 
 // ============================================================================
-// CPU 版本的向量加法
+// CPU 版本的矩阵乘法（朴素三重循环）
 // ============================================================================
-/**
- * 在CPU上执行向量加法
- * @param a 输入向量A
- * @param b 输入向量B
- * @param c 输出向量C
- * @param n 向量长度
- */
-void vector_add_cpu(float *a, float *b, float *c, int n) {
-    // CPU使用循环逐个处理每个元素
-    // 这是典型的串行执行方式
-    for (int i = 0; i < n; i++) {
-        c[i] = a[i] + b[i];
+void matmul_cpu(const float *A, const float *B, float *C, int dim) {
+    for (int row = 0; row < dim; row++) {
+        for (int col = 0; col < dim; col++) {
+            float sum = 0.0f;
+            for (int k = 0; k < dim; k++) {
+                sum += A[row * dim + k] * B[k * dim + col];
+            }
+            C[row * dim + col] = sum;
+        }
     }
 }
 
 // ============================================================================
-// GPU 版本的向量加法（核函数）
+// GPU 版本的矩阵乘法（tiled + shared memory）
 // ============================================================================
-/**
- * 在GPU上执行向量加法的核函数
- * 使用__global__修饰符表示这是一个可以从CPU调用的GPU函数
- *
- * 核函数的特点：
- * 1. 由CPU调用，在GPU上执行
- * 2. 被多个线程并行执行
- * 3. 每个线程处理一个或多个数据元素
- */
-__global__ void vector_add_gpu(float *a, float *b, float *c, int n) {
-    // 计算当前线程应该处理的元素索引
-    // blockIdx.x: 当前线程块在网格中的索引
-    // blockDim.x: 线程块中线程的数量
-    // threadIdx.x: 当前线程在线程块中的索引
-    int i = blockIdx.x * blockDim.x + threadIdx.x;
+__global__ void matmul_tiled_kernel(const float *A, const float *B, float *C, int dim) {
+    // 共享内存：分别缓存 A 和 B 的一个 tile
+    __shared__ float As[TILE_SIZE][TILE_SIZE];
+    __shared__ float Bs[TILE_SIZE][TILE_SIZE];
 
-    // 边界检查：确保不越界访问
-    // 当线程数量大于数据量时，部分线程会跳过计算
-    if (i < n) {
-        c[i] = a[i] + b[i];
+    int row = blockIdx.y * TILE_SIZE + threadIdx.y;
+    int col = blockIdx.x * TILE_SIZE + threadIdx.x;
+
+    float sum = 0.0f;
+
+    // 以 TILE_SIZE 为步长遍历 K 维
+    for (int t = 0; t < dim; t += TILE_SIZE) {
+        // 加载 A 的 tile 到 shared memory
+        int aCol = t + threadIdx.x;
+        if (row < dim && aCol < dim) {
+            As[threadIdx.y][threadIdx.x] = A[row * dim + aCol];
+        } else {
+            As[threadIdx.y][threadIdx.x] = 0.0f;
+        }
+
+        // 加载 B 的 tile 到 shared memory
+        int bRow = t + threadIdx.y;
+        if (bRow < dim && col < dim) {
+            Bs[threadIdx.y][threadIdx.x] = B[bRow * dim + col];
+        } else {
+            Bs[threadIdx.y][threadIdx.x] = 0.0f;
+        }
+
+        __syncthreads();
+
+        // 计算一个 tile 内的部分积
+        #pragma unroll
+        for (int k = 0; k < TILE_SIZE; k++) {
+            sum += As[threadIdx.y][k] * Bs[k][threadIdx.x];
+        }
+
+        __syncthreads();
+    }
+
+    if (row < dim && col < dim) {
+        C[row * dim + col] = sum;
     }
 }
 
@@ -75,112 +113,120 @@ double get_time_ms() {
 // ============================================================================
 int main() {
     printf("========================================\n");
-    printf("    CPU vs GPU 性能对比演示程序 _1\n");
+    printf("    CPU vs GPU 矩阵乘法性能对比演示程序 _1\n");
     printf("========================================\n\n");
 
+    const int dim = DIM;
+    const size_t bytes = (size_t)dim * (size_t)dim * sizeof(float);
+
     // ------------------------------------------------------------------------
-    // 1. 在主机（CPU）内存中分配空间
+    // 1. 在主机（CPU）内存中分配矩阵空间
     // ------------------------------------------------------------------------
-    printf("[步骤1] 分配主机内存...\n");
-    float *h_a = (float*)malloc(N * sizeof(float));
-    float *h_b = (float*)malloc(N * sizeof(float));
-    float *h_c_cpu = (float*)malloc(N * sizeof(float));
-    float *h_c_gpu = (float*)malloc(N * sizeof(float));
+    printf("[步骤1] 分配主机矩阵内存...\n");
+    float *h_a = (float*)malloc(bytes);
+    float *h_b = (float*)malloc(bytes);
+    float *h_c_cpu = (float*)malloc(bytes);
+    float *h_c_gpu = (float*)malloc(bytes);
 
     if (!h_a || !h_b || !h_c_cpu || !h_c_gpu) {
         printf("错误：主机内存分配失败！\n");
         return -1;
     }
-    printf("    已分配 %d 个浮点数 (%.2f MB)\n\n", N, N * sizeof(float) * 4 / 1024.0 / 1024.0);
+    printf("    矩阵维度: %d x %d\n", dim, dim);
+    printf("    每个矩阵大小: %.2f MB\n\n", (double)bytes / 1024.0 / 1024.0);
 
     // ------------------------------------------------------------------------
     // 2. 初始化数据
     // ------------------------------------------------------------------------
     printf("[步骤2] 初始化输入数据...\n");
-    for (int i = 0; i < N; i++) {
-        h_a[i] = (float)i;
-        h_b[i] = (float)(i * 2);
+    for (int row = 0; row < dim; row++) {
+        for (int col = 0; col < dim; col++) {
+            // 让数据范围适中，避免数值太大导致误差判断困难
+            h_a[row * dim + col] = (float)((row * dim + col) % 100) / 10.0f;
+            h_b[row * dim + col] = (float)((row + col) % 100) / 10.0f;
+        }
     }
     printf("    数据初始化完成\n\n");
 
     // ========================================================================
-    // CPU 执行部分
+    // CPU 执行部分：朴素矩阵乘法
     // ========================================================================
-    printf("[步骤3] 在CPU上执行向量加法...\n");
+    printf("[步骤3] 在CPU上执行矩阵乘法(朴素)...\n");
     double cpu_start = get_time_ms();
 
-    // 调用CPU版本的向量加法
-    vector_add_cpu(h_a, h_b, h_c_cpu, N);
+    matmul_cpu(h_a, h_b, h_c_cpu, dim);
 
     double cpu_end = get_time_ms();
     double cpu_time = cpu_end - cpu_start;
     printf("    CPU 执行时间: %.3f 毫秒\n\n", cpu_time);
 
     // ========================================================================
-    // GPU 执行部分
+    // GPU 执行部分：tiled + shared memory 矩阵乘法
     // ========================================================================
-    printf("[步骤4] 在GPU上执行向量加法...\n");
-
-    // 4.1 在设备（GPU）内存中分配空间
-    float *d_a, *d_b, *d_c;
-    cudaMalloc(&d_a, N * sizeof(float));
-    cudaMalloc(&d_b, N * sizeof(float));
-    cudaMalloc(&d_c, N * sizeof(float));
-
-    // 4.2 将数据从主机拷贝到设备
-    // cudaMemcpyHostToDevice: 从CPU拷贝到GPU
-    cudaMemcpy(d_a, h_a, N * sizeof(float), cudaMemcpyHostToDevice);
-    cudaMemcpy(d_b, h_b, N * sizeof(float), cudaMemcpyHostToDevice);
-
-    // 4.3 配置线程网格和线程块
-    // 每个线程块包含256个线程
-    int threads_per_block = 256;
-
-    // 计算需要的线程块数量（向上取整）
-    int blocks_per_grid = (N + threads_per_block - 1) / threads_per_block;
-
-    printf("    线程块数量: %d\n", blocks_per_grid);
-    printf("    每块线程数: %d\n", threads_per_block);
-    printf("    总线程数: %d\n", blocks_per_grid * threads_per_block);
+    printf("[步骤4] 在GPU上执行矩阵乘法(tiled)...\n");
 
     // 4.4 创建CUDA事件用于精确计时
     cudaEvent_t start, stop;
-    cudaEventCreate(&start);
-    cudaEventCreate(&stop);
+    CUDA_CHECK(cudaEventCreate(&start));
+    CUDA_CHECK(cudaEventCreate(&stop));
 
-    // 4.5 执行GPU核函数
-    cudaEventRecord(start);  // 记录开始时间
+    // 4.5 执行GPU核函数（事件计时）
+    CUDA_CHECK(cudaEventRecord(start));
 
-    // 核函数调用语法：kernel<<<网格大小, 线程块大小>>>(参数...)
-    vector_add_gpu<<<blocks_per_grid, threads_per_block>>>(d_a, d_b, d_c, N);
+    float *d_a, *d_b, *d_c;
+    CUDA_CHECK(cudaMalloc(&d_a, bytes));
+    CUDA_CHECK(cudaMalloc(&d_b, bytes));
+    CUDA_CHECK(cudaMalloc(&d_c, bytes));
 
-    cudaEventRecord(stop);   // 记录结束时间
-    cudaEventSynchronize(stop);  // 等待GPU执行完成
+    // 4.2 将数据从主机拷贝到设备
+    CUDA_CHECK(cudaMemcpy(d_a, h_a, bytes, cudaMemcpyHostToDevice));
+    CUDA_CHECK(cudaMemcpy(d_b, h_b, bytes, cudaMemcpyHostToDevice));
+
+    dim3 threads(TILE_SIZE, TILE_SIZE);
+    dim3 grid((dim + TILE_SIZE - 1) / TILE_SIZE, (dim + TILE_SIZE - 1) / TILE_SIZE);
+    printf("    Grid: (%d, %d), Block: (%d, %d)\n", (int)grid.x, (int)grid.y, (int)threads.x, (int)threads.y);   
+
+    matmul_tiled_kernel<<<grid, threads>>>(d_a, d_b, d_c, dim);
+    CUDA_CHECK(cudaGetLastError());
+
+    CUDA_CHECK(cudaEventRecord(stop));
+    CUDA_CHECK(cudaEventSynchronize(stop));
 
     // 4.6 计算GPU执行时间
     float gpu_time;
-    cudaEventElapsedTime(&gpu_time, start, stop);
+    CUDA_CHECK(cudaEventElapsedTime(&gpu_time, start, stop));
     printf("    GPU 执行时间: %.3f 毫秒\n\n", gpu_time);
 
     // 4.7 将结果从设备拷贝回主机
-    // cudaMemcpyDeviceToHost: 从GPU拷贝到CPU
-    cudaMemcpy(h_c_gpu, d_c, N * sizeof(float), cudaMemcpyDeviceToHost);
+    CUDA_CHECK(cudaMemcpy(h_c_gpu, d_c, bytes, cudaMemcpyDeviceToHost));
 
     // ========================================================================
     // 验证结果
     // ========================================================================
     printf("[步骤5] 验证计算结果...\n");
-    bool correct = true;
-    for (int i = 0; i < N; i++) {
-        if (h_c_cpu[i] != h_c_gpu[i]) {
-            correct = false;
-            printf("    错误：索引 %d 处结果不匹配 (CPU: %.0f, GPU: %.0f)\n",
-                   i, h_c_cpu[i], h_c_gpu[i]);
+    int correct = 1;
+    float max_err = 0.0f;
+    int mismatch_idx = -1;
+    for (int idx = 0; idx < dim * dim; idx++) {
+        float cpu_v = h_c_cpu[idx];
+        float gpu_v = h_c_gpu[idx];
+        float err = fabsf(cpu_v - gpu_v);
+        if (err > max_err) {
+            max_err = err;
+        }
+        if (err > EPS) {
+            correct = 0;
+            mismatch_idx = idx;
             break;
         }
     }
-    if (correct) {
-        printf("    验证通过！CPU和GPU结果一致\n\n");
+    if (correct) printf("    验证通过！CPU 和 GPU 结果一致 (max_err=%.6f)\n\n", max_err);
+    else {
+        int row = mismatch_idx / dim;
+        int col = mismatch_idx % dim;
+        printf("    验证失败！在 C[%d,%d] (idx=%d) 处误差过大\n", row, col, mismatch_idx);
+        printf("    CPU: %.6f, GPU: %.6f, abs_err=%.6f (EPS=%.6f)\n\n",
+               h_c_cpu[mismatch_idx], h_c_gpu[mismatch_idx], fabsf(h_c_cpu[mismatch_idx] - h_c_gpu[mismatch_idx]), EPS);
     }
 
     // ========================================================================
@@ -189,18 +235,17 @@ int main() {
     printf("========================================\n");
     printf("              性能对比结果\n");
     printf("========================================\n");
-    printf("    数据量: %d 个浮点数\n", N);
+    printf("    矩阵维度: %d x %d\n", dim, dim);
     printf("    CPU 时间: %.3f 毫秒\n", cpu_time);
     printf("    GPU 时间: %.3f 毫秒\n", gpu_time);
     printf("    加速比: %.2fx\n", cpu_time / gpu_time);
     printf("========================================\n\n");
 
-    // 解释加速原因
     printf("性能分析说明：\n");
-    printf("1. GPU通过大规模并行（数千个线程同时执行）获得加速\n");
-    printf("2. 对于简单运算，数据传输开销可能抵消并行收益\n");
-    printf("3. 数据量越大，GPU优势越明显\n");
-    printf("4. 此示例展示了GPU计算的基本模式\n");
+    printf("1. GPU 通过大量并行线程处理矩阵元素\n");
+    printf("2. tiled kernel 使用 shared memory 减少全局访存\n");
+    printf("3. 数据传输开销也会影响总体性能（本例计时的是 kernel 时间）\n");
+    printf("4. 此示例用于展示 CPU/GPU 对比与计时校验流程\n");
 
     // ------------------------------------------------------------------------
     // 清理资源

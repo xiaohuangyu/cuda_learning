@@ -1,0 +1,8 @@
+[20260325] hy@omen，wsl2:ubuntu
+
+release模式编译
+./scripts/compile_all.sh --arch=120 --release
+
+添加了examples/01_gpu_basics/cpu_vs_gpu_1.cu，用于对比cpu、gpu上的矩阵乘法
+
+
