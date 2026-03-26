@@ -18,7 +18,7 @@
 
 // 矩阵维度：A(dim x dim) * B(dim x dim) = C(dim x dim)
 // 选择一个适中大小，保证演示时 CPU 不会太慢
-#define DIM 1024
+#define DIM 700
 
 // GPU 计算 tile 大小（必须和 shared memory 数组维度一致）
 #define TILE_SIZE 16
@@ -57,7 +57,7 @@ void matmul_cpu(const float *A, const float *B, float *C, int dim) {
 // ============================================================================
 __global__ void matmul_tiled_kernel(const float *A, const float *B, float *C, int dim) {
     // 共享内存：分别缓存 A 和 B 的一个 tile
-    __shared__ float As[TILE_SIZE][TILE_SIZE];
+    __shared__ float As[TILE_SIZE][TILE_SIZE];  //__shared__
     __shared__ float Bs[TILE_SIZE][TILE_SIZE];
 
     int row = blockIdx.y * TILE_SIZE + threadIdx.y;
@@ -204,9 +204,11 @@ int main() {
     // 验证结果
     // ========================================================================
     printf("[步骤5] 验证计算结果...\n");
+
     int correct = 1;
     float max_err = 0.0f;
     int mismatch_idx = -1;
+
     for (int idx = 0; idx < dim * dim; idx++) {
         float cpu_v = h_c_cpu[idx];
         float gpu_v = h_c_gpu[idx];
@@ -220,6 +222,7 @@ int main() {
             break;
         }
     }
+
     if (correct) printf("    验证通过！CPU 和 GPU 结果一致 (max_err=%.6f)\n\n", max_err);
     else {
         int row = mismatch_idx / dim;
