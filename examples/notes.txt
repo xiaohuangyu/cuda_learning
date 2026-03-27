@@ -2,7 +2,7 @@
 
 cursor远程本地的wsl2 ubuntu子系统，编译cuda代码并执行
 
-release模式编译
+release模式编译，使用.sh脚本文件
 ./scripts/compile_all.sh --arch=120 --release
 
 添加了examples/01_gpu_basics/cpu_vs_gpu_1.cu，修改对应的CMakeLists.txt
@@ -13,7 +13,6 @@ matmul_tiled_kernel中声明变量的__shared__关键字，影响矩阵乘法执
 
 [20260326]
 CUDA与cuBLAS、cuDNN、CUTLASS的关系
-cuda stream/graph概念
 
 cursor/wsl2如何调试cuda
 cuda gdb
@@ -23,4 +22,8 @@ cuda gdb
 右键Go to Definition/Declaration
 clangd
 
-
+[20260327]
+cuda概念
+stream：
+event：/01_gpu_basics/cpu_vs_gpu_1.cu，/08_profiling/profiling_demo.cu
+graph：
