@@ -26,6 +26,17 @@ clangd
 cuda概念
 stream：
 event：/01_gpu_basics/cpu_vs_gpu_1.cu，/08_profiling/profiling_demo.cu
+wmma：
 
-nsight system & compute
+【nsight system】
+examples/08_profiling/profiling_demo.cu
+nsys profile -o my_report /home/hy/cuda_learning-1/examples/build/08_profiling/profiling_demo
+生成一个.nsys-rep 文件，在win11下使用nsys打开，需要确保nsys版本足够高
 
+【nsight compute】
+ncu功能需要在win11本机打开“允许所有用户访问GPU性能计数器”
+ncu --set full -o prof_demo /home/hy/cuda_learning-1/examples/build/08_profiling/profiling_demo
+
+使用ncu时的巨大bug：
+NVIDIA Control Panel打开“允许所有用户访问GPU性能计数器”后，电脑反复黑屏、短暂恢复正常，交替出现
+在右下角托盘中点开nv设置后，黑屏现象消失，gemini3提示可能跟nv驱动有关
