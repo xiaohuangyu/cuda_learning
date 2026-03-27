@@ -17,6 +17,7 @@ set(CMAKE_CUDA_STANDARD_REQUIRED ON)
 add_executable(cpu_vs_gpu cpu_vs_gpu.cu)
 add_executable(cpu_vs_gpu_1 cpu_vs_gpu_1.cu)
 add_executable(01_basics_01 basics_01.cu)
+add_executable(01_stream_event stream_event.cu)
 
 # 链接 CUDA 运行时库
 target_link_libraries(cpu_vs_gpu CUDA::cudart)
