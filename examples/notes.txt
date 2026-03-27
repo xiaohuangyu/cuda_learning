@@ -42,4 +42,5 @@ ncu --set full -o prof_demo /home/hy/cuda_learning-1/examples/build/08_profiling
 NVIDIA Control Panel打开“允许所有用户访问GPU性能计数器”后，电脑反复黑屏、短暂恢复正常，交替出现
 在右下角托盘中点开nv设置后，黑屏现象消失，gemini3提示可能跟nv驱动有关
 
+>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>[20260328]
 
