@@ -1,5 +1,11 @@
-#include <cuda_runtime.h>
+/*
+ * Basics 01 Demo
+ * ==========================
+ * 本程序演示cuda stream概念的示例程序
+ *   stream：流是并行执行的指令序列
+ */
 
+#include <cuda_runtime.h>
 #include <cmath>
 #include <cstdio>
 #include <cstdlib>
@@ -38,6 +44,7 @@ static float run_single_default_stream(const float* h_in, float* h_out, int n, i
     CUDA_CHECK(cudaEventRecord(start));
 
     CUDA_CHECK(cudaMemcpy(d_in, h_in, static_cast<size_t>(n) * sizeof(float), cudaMemcpyHostToDevice));
+
     int threads = 256;
     int blocks = (n + threads - 1) / threads;
     transform_kernel<<<blocks, threads>>>(d_in, d_out, n, iters);
@@ -46,6 +53,7 @@ static float run_single_default_stream(const float* h_in, float* h_out, int n, i
 
     CUDA_CHECK(cudaEventRecord(stop));
     CUDA_CHECK(cudaEventSynchronize(stop));
+
     float ms = 0.0f;
     CUDA_CHECK(cudaEventElapsedTime(&ms, start, stop));
 
@@ -53,11 +61,12 @@ static float run_single_default_stream(const float* h_in, float* h_out, int n, i
     CUDA_CHECK(cudaEventDestroy(stop));
     CUDA_CHECK(cudaFree(d_in));
     CUDA_CHECK(cudaFree(d_out));
+
     return ms;
 }
 
 static float run_two_streams(const float* h_in, float* h_out, int n, int iters) {
-    const int chunks = 2;
+    const int chunks = 4;
     const int chunk_n = n / chunks;
     const size_t chunk_bytes = static_cast<size_t>(chunk_n) * sizeof(float);
 
@@ -106,7 +115,7 @@ static float run_two_streams(const float* h_in, float* h_out, int n, int iters) 
 }
 
 int main() {
-    const int n = 1 << 22;  // 约 4M 元素
+    const int n = 1 << 22;  // 22，约 4M 元素
     const int iters = 300;
     const size_t bytes = static_cast<size_t>(n) * sizeof(float);
 
